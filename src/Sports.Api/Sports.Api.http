@@ -1,0 +1,16 @@
+@base = http://localhost:5128
+
+### Seed teams
+POST {{base}}/api/admin/seed/teams
+
+### Seed today's games
+POST {{base}}/api/admin/seed/games/today
+
+### Calculate today's predictions
+POST {{base}}/api/admin/predictions/today
+
+### Today's games
+GET {{base}}/api/games/today
+
+### Today's predictions
+GET {{base}}/api/predictions/today
