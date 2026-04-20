@@ -6,16 +6,16 @@ namespace Sports.Api.Background;
 
 public class IngestionBackgroundService : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<IngestionBackgroundService> _logger;
     private readonly IngestionOptions _options;
+    private readonly SyncOrchestrator _syncOrchestrator;
 
     public IngestionBackgroundService(
-        IServiceProvider serviceProvider,
+        SyncOrchestrator syncOrchestrator,
         IOptions<IngestionOptions> options,
         ILogger<IngestionBackgroundService> logger)
     {
-        _serviceProvider = serviceProvider;
+        _syncOrchestrator = syncOrchestrator;
         _logger = logger;
         _options = options.Value;
     }
@@ -44,15 +44,7 @@ public class IngestionBackgroundService : BackgroundService
     {
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var seedService = scope.ServiceProvider.GetRequiredService<SeedService>();
-            var predictionService = scope.ServiceProvider.GetRequiredService<PredictionService>();
-
-            var today = DateOnly.FromDateTime(DateTime.UtcNow);
-            await seedService.SeedTeamsAsync(cancellationToken);
-            await seedService.SeedGamesByDateAsync(today, cancellationToken);
-            await predictionService.CalculatePredictionsForDateAsync(today, cancellationToken);
-            _logger.LogInformation("Ciclo de ingesta completado para {Date}", today);
+            await _syncOrchestrator.RunCycleAsync(cancellationToken);
         }
         catch (Exception ex)
         {

@@ -1,3 +1,4 @@
+using Sports.Api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Sports.Api.Data;
 using Sports.Domain.Entities;
@@ -15,8 +16,7 @@ public class PredictionService
 
     public async Task<List<Prediction>> CalculatePredictionsForDateAsync(DateOnly date, CancellationToken cancellationToken = default)
     {
-        var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-        var end = start.AddDays(1);
+        var (start, end) = DateRangeHelper.GetUtcRangeForLocalDate(date);
 
         var games = await _dbContext.Games
             .Where(x => x.GameDateUtc >= start && x.GameDateUtc < end)

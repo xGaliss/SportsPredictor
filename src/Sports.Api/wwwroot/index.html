@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SportsPredictor</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, Arial, sans-serif;
+      background: #0b1220;
+      color: #e5eefc;
+    }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 24px; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:24px; }
+    .brand h1 { margin:0; font-size: 28px; }
+    .brand p { margin:6px 0 0; color:#9db0cf; }
+    .actions { display:flex; gap:12px; flex-wrap:wrap; }
+    button {
+      border: 0; border-radius: 12px; padding: 11px 16px; cursor: pointer;
+      background: #3b82f6; color:white; font-weight:600;
+    }
+    button.secondary { background:#1f2937; color:#dbe7ff; }
+    button:disabled { opacity:.6; cursor:wait; }
+    .grid { display:grid; grid-template-columns: repeat(12, 1fr); gap:16px; }
+    .panel {
+      grid-column: span 12;
+      background: linear-gradient(180deg, rgba(20,30,52,.96), rgba(11,18,32,.96));
+      border: 1px solid rgba(151,170,204,.15);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.18);
+    }
+    .stats { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; }
+    .stat { background:#11192b; border-radius:14px; padding:14px; border:1px solid rgba(151,170,204,.12); }
+    .stat .label { color:#8ea1c3; font-size:13px; }
+    .stat .value { margin-top:8px; font-size:28px; font-weight:800; }
+    .columns { display:grid; grid-template-columns: 1.1fr .9fr; gap:16px; }
+    .list { display:grid; gap:12px; }
+    .card { background:#0e1728; border:1px solid rgba(151,170,204,.12); border-radius:14px; padding:14px; }
+    .match { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+    .teams { display:grid; gap:6px; }
+    .muted { color:#8ea1c3; }
+    .prob { text-align:right; min-width:170px; }
+    .prob strong { font-size:18px; }
+    .bar { margin-top:10px; width:100%; height:10px; background:#1f2937; border-radius:999px; overflow:hidden; }
+    .bar > span { display:block; height:100%; background: linear-gradient(90deg, #22c55e, #3b82f6); }
+    .empty { color:#9db0cf; padding:16px 0; }
+    .footer { margin-top:16px; color:#8ea1c3; font-size:13px; }
+    .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#10233f; color:#bfdbfe; font-size:13px; }
+    .dot { width:8px; height:8px; border-radius:999px; background:#22c55e; display:inline-block; }
+    pre { white-space: pre-wrap; word-break: break-word; margin:0; }
+    @media (max-width: 900px) {
+      .stats, .columns { grid-template-columns: 1fr; }
+      .prob { text-align:left; min-width:0; }
+      .match { flex-direction:column; align-items:flex-start; }
+      .topbar { flex-direction:column; align-items:flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <h1>SportsPredictor</h1>
+        <p>Dashboard NBA con sync automática, partidos del día y predicción simple.</p>
+      </div>
+      <div class="actions">
+        <button id="refreshBtn">Actualizar</button>
+        <button id="syncBtn" class="secondary">Forzar sync</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap;">
+          <h2 style="margin:0;">Estado</h2>
+          <div class="badge"><span class="dot"></span><span id="statusBadge">Cargando…</span></div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="label">Equipos</div><div class="value" id="teamsCount">-</div></div>
+          <div class="stat"><div class="label">Partidos del día</div><div class="value" id="gamesCount">-</div></div>
+          <div class="stat"><div class="label">Predicciones</div><div class="value" id="predictionsCount">-</div></div>
+          <div class="stat"><div class="label">Última sync</div><div class="value" id="lastSync" style="font-size:18px;">-</div></div>
+        </div>
+        <div class="footer" id="statusSummary">Cargando estado…</div>
+      </section>
+
+      <div class="columns" style="grid-column: span 12;">
+        <section class="panel">
+          <h2 style="margin-top:0;">Partidos de hoy</h2>
+          <div class="list" id="gamesList"></div>
+        </section>
+
+        <section class="panel">
+          <h2 style="margin-top:0;">Predicciones</h2>
+          <div class="list" id="predictionsList"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+<script>
+const statusEls = {
+  teamsCount: document.getElementById('teamsCount'),
+  gamesCount: document.getElementById('gamesCount'),
+  predictionsCount: document.getElementById('predictionsCount'),
+  lastSync: document.getElementById('lastSync'),
+  statusBadge: document.getElementById('statusBadge'),
+  statusSummary: document.getElementById('statusSummary')
+};
+const gamesList = document.getElementById('gamesList');
+const predictionsList = document.getElementById('predictionsList');
+const refreshBtn = document.getElementById('refreshBtn');
+const syncBtn = document.getElementById('syncBtn');
+
+function fmtDate(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  return new Intl.DateTimeFormat('es-ES', { dateStyle: 'short', timeStyle: 'short' }).format(d);
+}
+
+function setBusy(btn, busy) {
+  btn.disabled = busy;
+  btn.textContent = busy ? 'Cargando…' : (btn === syncBtn ? 'Forzar sync' : 'Actualizar');
+}
+
+function renderEmpty(target, text) {
+  target.innerHTML = `<div class="empty">${text}</div>`;
+}
+
+function renderGames(games) {
+  if (!games.length) return renderEmpty(gamesList, 'No hay partidos guardados para hoy todavía.');
+  gamesList.innerHTML = games.map(game => `
+    <article class="card">
+      <div class="match">
+        <div class="teams">
+          <strong>${game.awayTeam?.abbreviation ?? 'N/A'} @ ${game.homeTeam?.abbreviation ?? 'N/A'}</strong>
+          <div>${game.awayTeam?.name ?? 'Equipo visitante'} vs ${game.homeTeam?.name ?? 'Equipo local'}</div>
+          <div class="muted">${fmtDate(game.gameDateUtc)} · ${game.status}</div>
+        </div>
+        <div class="prob">
+          <div><strong>${game.awayScore ?? '-'} - ${game.homeScore ?? '-'}</strong></div>
+          <div class="muted">Marcador</div>
+        </div>
+      </div>
+    </article>`).join('');
+}
+
+function renderPredictions(predictions) {
+  if (!predictions.length) return renderEmpty(predictionsList, 'Todavía no hay predicciones calculadas.');
+  predictionsList.innerHTML = predictions.map(pred => `
+    <article class="card">
+      <div class="match">
+        <div class="teams">
+          <strong>${pred.awayTeam?.abbreviation ?? 'AWAY'} @ ${pred.homeTeam?.abbreviation ?? 'HOME'}</strong>
+          <div>${pred.summary ?? ''}</div>
+          <div class="muted">${fmtDate(pred.gameDateUtc)}</div>
+        </div>
+        <div class="prob">
+          <div><strong>${pred.homeWinProbability}%</strong> local</div>
+          <div class="muted">${pred.awayWinProbability}% visitante</div>
+        </div>
+      </div>
+      <div class="bar"><span style="width:${Math.max(0, Math.min(100, pred.homeWinProbability || 0))}%"></span></div>
+    </article>`).join('');
+}
+
+async function loadDashboard() {
+  setBusy(refreshBtn, true);
+  try {
+    const [statusRes, gamesRes, predictionsRes] = await Promise.all([
+      fetch('/api/status'),
+      fetch('/api/games/today'),
+      fetch('/api/predictions/today')
+    ]);
+
+    const status = await statusRes.json();
+    const games = await gamesRes.json();
+    const predictions = await predictionsRes.json();
+
+    statusEls.teamsCount.textContent = status.teamsCount;
+    statusEls.gamesCount.textContent = status.gamesTodayCount;
+    statusEls.predictionsCount.textContent = status.predictionsTodayCount;
+    statusEls.lastSync.textContent = fmtDate(status.lastSyncUtc);
+    statusEls.statusBadge.textContent = status.providerConfigured ? 'API lista' : 'Falta API key';
+    statusEls.statusSummary.textContent = `Proveedor: ${status.providerBaseUrl}. Fallback mock: ${status.useMockFallbackData ? 'activo' : 'desactivado'}. Último ciclo: ${fmtDate(status.lastSyncUtc)}.`;
+
+    renderGames(games);
+    renderPredictions(predictions);
+  } catch (err) {
+    statusEls.statusBadge.textContent = 'Error';
+    statusEls.statusSummary.textContent = 'No se pudo cargar el dashboard.';
+    renderEmpty(gamesList, 'Error cargando partidos.');
+    renderEmpty(predictionsList, 'Error cargando predicciones.');
+  } finally {
+    setBusy(refreshBtn, false);
+  }
+}
+
+async function forceSync() {
+  setBusy(syncBtn, true);
+  try {
+    const res = await fetch('/api/admin/sync/now', { method: 'POST' });
+    if (!res.ok) throw new Error('sync failed');
+    await loadDashboard();
+  } catch {
+    alert('No se pudo lanzar la sync manual.');
+  } finally {
+    setBusy(syncBtn, false);
+  }
+}
+
+refreshBtn.addEventListener('click', loadDashboard);
+syncBtn.addEventListener('click', forceSync);
+loadDashboard();
+</script>
+</body>
+</html>

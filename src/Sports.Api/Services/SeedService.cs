@@ -1,3 +1,4 @@
+using Sports.Api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Sports.Api.Data;
@@ -142,8 +143,7 @@ public class SeedService
 
     private async Task EnsureBasicTeamStatsForCompletedGamesAsync(DateOnly date, CancellationToken cancellationToken)
     {
-        var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-        var end = start.AddDays(1);
+        var (start, end) = DateRangeHelper.GetUtcRangeForLocalDate(date);
 
         var completedGames = await _dbContext.Games
             .Where(x => x.GameDateUtc >= start && x.GameDateUtc < end && x.IsCompleted)

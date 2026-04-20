@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Sports.Api.Background;
 using Sports.Api.Data;
+using Sports.Api.Helpers;
 using Sports.Api.Models;
 using Sports.Api.Services;
 using Sports.Infrastructure.External;
@@ -28,6 +29,7 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddScoped<SeedService>();
 builder.Services.AddScoped<PredictionService>();
+builder.Services.AddSingleton<SyncOrchestrator>();
 
 builder.Services.AddHttpClient<IBasketballDataProvider, BalldontlieDataProvider>((sp, client) =>
 {
@@ -59,7 +61,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.MapGet("/", () => Results.Ok(new { name = "SportsPredictor API", status = "ok" }));
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+app.MapGet("/api", () => Results.Ok(new { name = "SportsPredictor API", status = "ok" }));
 
 app.MapGet("/api/admin/config/balldontlie", (IOptions<BalldontlieOptions> options) =>
 {
@@ -72,15 +77,36 @@ app.MapGet("/api/admin/config/balldontlie", (IOptions<BalldontlieOptions> option
     });
 });
 
+app.MapGet("/api/status", async (AppDbContext db, IOptions<BalldontlieOptions> options, SyncOrchestrator syncOrchestrator, CancellationToken ct) =>
+{
+    var localDate = DateRangeHelper.GetCurrentLocalDate();
+    var (startUtc, endUtc) = DateRangeHelper.GetUtcRangeForLocalDate(localDate);
+
+    var gamesTodayCount = await db.Games.CountAsync(x => x.GameDateUtc >= startUtc && x.GameDateUtc < endUtc, ct);
+    var predictionsTodayCount = await db.Predictions.CountAsync(x => x.CalculatedUtc >= startUtc && x.CalculatedUtc < endUtc, ct);
+
+    var cfg = options.Value;
+    return Results.Ok(new
+    {
+        LocalDate = localDate,
+        TeamsCount = await db.Teams.CountAsync(ct),
+        GamesTodayCount = gamesTodayCount,
+        PredictionsTodayCount = predictionsTodayCount,
+        LastSyncUtc = syncOrchestrator.LastSuccessfulSyncUtc,
+        ProviderBaseUrl = cfg.BaseUrl,
+        ProviderConfigured = !string.IsNullOrWhiteSpace(cfg.ApiKey) && !string.Equals(cfg.ApiKey, "PUT_YOUR_API_KEY_HERE", StringComparison.OrdinalIgnoreCase),
+        cfg.UseMockFallbackData
+    });
+});
+
 app.MapGet("/api/games/today", async (AppDbContext db, CancellationToken ct) =>
 {
-    var today = DateOnly.FromDateTime(DateTime.UtcNow);
-    var start = today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-    var end = start.AddDays(1);
+    var localDate = DateRangeHelper.GetCurrentLocalDate();
+    var (startUtc, endUtc) = DateRangeHelper.GetUtcRangeForLocalDate(localDate);
 
     var teams = await db.Teams.ToDictionaryAsync(x => x.Id, ct);
     var games = await db.Games
-        .Where(x => x.GameDateUtc >= start && x.GameDateUtc < end)
+        .Where(x => x.GameDateUtc >= startUtc && x.GameDateUtc < endUtc)
         .OrderBy(x => x.GameDateUtc)
         .ToListAsync(ct);
 
@@ -103,13 +129,12 @@ app.MapGet("/api/games/today", async (AppDbContext db, CancellationToken ct) =>
 
 app.MapGet("/api/predictions/today", async (AppDbContext db, CancellationToken ct) =>
 {
-    var today = DateOnly.FromDateTime(DateTime.UtcNow);
-    var start = today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-    var end = start.AddDays(1);
+    var localDate = DateRangeHelper.GetCurrentLocalDate();
+    var (startUtc, endUtc) = DateRangeHelper.GetUtcRangeForLocalDate(localDate);
 
     var teams = await db.Teams.ToDictionaryAsync(x => x.Id, ct);
     var games = await db.Games
-        .Where(x => x.GameDateUtc >= start && x.GameDateUtc < end)
+        .Where(x => x.GameDateUtc >= startUtc && x.GameDateUtc < endUtc)
         .ToDictionaryAsync(x => x.Id, ct);
 
     var gameIds = games.Keys.ToList();
@@ -151,16 +176,24 @@ app.MapPost("/api/admin/seed/teams", async (SeedService seedService, Cancellatio
 
 app.MapPost("/api/admin/seed/games/today", async (SeedService seedService, CancellationToken ct) =>
 {
-    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+    var today = DateRangeHelper.GetCurrentLocalDate();
     var created = await seedService.SeedGamesByDateAsync(today, ct);
     return Results.Ok(new { date = today, created });
 });
 
 app.MapPost("/api/admin/predictions/today", async (PredictionService predictionService, CancellationToken ct) =>
 {
-    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+    var today = DateRangeHelper.GetCurrentLocalDate();
     var predictions = await predictionService.CalculatePredictionsForDateAsync(today, ct);
     return Results.Ok(new { date = today, count = predictions.Count });
 });
+
+app.MapPost("/api/admin/sync/now", async (SyncOrchestrator syncOrchestrator, CancellationToken ct) =>
+{
+    await syncOrchestrator.RunCycleAsync(ct);
+    return Results.Ok(new { status = "ok", lastSyncUtc = syncOrchestrator.LastSuccessfulSyncUtc });
+});
+
+app.MapFallbackToFile("index.html");
 
 app.Run();
