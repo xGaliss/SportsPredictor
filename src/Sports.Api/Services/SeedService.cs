@@ -1,4 +1,3 @@
-using Sports.Api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Sports.Api.Data;
@@ -34,6 +33,12 @@ public class SeedService
         try
         {
             externalTeams = await _provider.GetTeamsAsync(cancellationToken);
+
+            if ((externalTeams is null || externalTeams.Count == 0) && _options.UseMockFallbackData)
+            {
+                _logger.LogWarning("El proveedor no devolvió equipos. Usando fallback mock.");
+                externalTeams = GetMockTeams();
+            }
         }
         catch (Exception ex)
         {
@@ -46,7 +51,10 @@ public class SeedService
 
         foreach (var externalTeam in externalTeams)
         {
-            var team = await _dbContext.Teams.FirstOrDefaultAsync(x => x.ExternalId == externalTeam.Id.ToString(), cancellationToken);
+            var team = await _dbContext.Teams.FirstOrDefaultAsync(
+                x => x.ExternalId == externalTeam.Id.ToString(),
+                cancellationToken);
+
             if (team is null)
             {
                 team = new Team
@@ -58,6 +66,7 @@ public class SeedService
                     Conference = externalTeam.Conference,
                     Division = externalTeam.Division
                 };
+
                 _dbContext.Teams.Add(team);
                 created++;
             }
@@ -83,6 +92,12 @@ public class SeedService
         try
         {
             externalGames = await _provider.GetGamesByDateAsync(date, cancellationToken);
+
+            if ((externalGames is null || externalGames.Count == 0) && _options.UseMockFallbackData)
+            {
+                _logger.LogWarning("El proveedor no devolvió partidos para {Date}. Usando fallback mock.", date);
+                externalGames = await BuildMockGamesAsync(date, cancellationToken);
+            }
         }
         catch (Exception ex)
         {
@@ -106,7 +121,10 @@ public class SeedService
                 continue;
             }
 
-            var game = await _dbContext.Games.FirstOrDefaultAsync(x => x.ExternalId == externalGame.Id.ToString(), cancellationToken);
+            var game = await _dbContext.Games.FirstOrDefaultAsync(
+                x => x.ExternalId == externalGame.Id.ToString(),
+                cancellationToken);
+
             if (game is null)
             {
                 game = new Game
@@ -121,6 +139,7 @@ public class SeedService
                     Season = externalGame.Season,
                     IsCompleted = IsCompletedStatus(externalGame.Status)
                 };
+
                 _dbContext.Games.Add(game);
                 created++;
             }
@@ -138,12 +157,14 @@ public class SeedService
 
         await _dbContext.SaveChangesAsync(cancellationToken);
         await EnsureBasicTeamStatsForCompletedGamesAsync(date, cancellationToken);
+
         return created;
     }
 
     private async Task EnsureBasicTeamStatsForCompletedGamesAsync(DateOnly date, CancellationToken cancellationToken)
     {
-        var (start, end) = DateRangeHelper.GetUtcRangeForLocalDate(date);
+        var start = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var end = start.AddDays(1);
 
         var completedGames = await _dbContext.Games
             .Where(x => x.GameDateUtc >= start && x.GameDateUtc < end && x.IsCompleted)
@@ -203,26 +224,63 @@ public class SeedService
         {
             await SeedTeamsAsync(cancellationToken);
         }
+
         return new List<BalldontlieGameDto>
-{
-    new()
-    {
-        Id = int.Parse(date.ToString("yyyyMMdd")) + 1,
-        Datetime = date.ToDateTime(new TimeOnly(23, 30), DateTimeKind.Utc),
-        Season = date.Month >= 10 ? date.Year : date.Year - 1,
-        Status = "Scheduled",
-        HomeTeam = new BalldontlieTeamDto { Id = 14, FullName = "Los Angeles Lakers", Name = "Lakers", Abbreviation = "LAL", City = "Los Angeles", Conference = "West", Division = "Pacific" },
-        VisitorTeam = new BalldontlieTeamDto { Id = 10, FullName = "Golden State Warriors", Name = "Warriors", Abbreviation = "GSW", City = "Golden State", Conference = "West", Division = "Pacific" }
-    },
-    new()
-    {
-        Id = int.Parse(date.ToString("yyyyMMdd")) + 2,
-        Datetime = date.ToDateTime(new TimeOnly(0, 30), DateTimeKind.Utc).AddDays(1),
-        Season = date.Month >= 10 ? date.Year : date.Year - 1,
-        Status = "Scheduled",
-        HomeTeam = new BalldontlieTeamDto { Id = 2, FullName = "Boston Celtics", Name = "Celtics", Abbreviation = "BOS", City = "Boston", Conference = "East", Division = "Atlantic" },
-        VisitorTeam = new BalldontlieTeamDto { Id = 21, FullName = "New York Knicks", Name = "Knicks", Abbreviation = "NYK", City = "New York", Conference = "East", Division = "Atlantic" }
-    }
-};
+        {
+            new()
+            {
+                Id = int.Parse(date.ToString("yyyyMMdd")) + 1,
+                Datetime = date.ToDateTime(new TimeOnly(23, 30), DateTimeKind.Utc),
+                Season = date.Month >= 10 ? date.Year : date.Year - 1,
+                Status = "Scheduled",
+                HomeTeam = new BalldontlieTeamDto
+                {
+                    Id = 14,
+                    FullName = "Los Angeles Lakers",
+                    Name = "Lakers",
+                    Abbreviation = "LAL",
+                    City = "Los Angeles",
+                    Conference = "West",
+                    Division = "Pacific"
+                },
+                VisitorTeam = new BalldontlieTeamDto
+                {
+                    Id = 10,
+                    FullName = "Golden State Warriors",
+                    Name = "Warriors",
+                    Abbreviation = "GSW",
+                    City = "Golden State",
+                    Conference = "West",
+                    Division = "Pacific"
+                }
+            },
+            new()
+            {
+                Id = int.Parse(date.ToString("yyyyMMdd")) + 2,
+                Datetime = date.ToDateTime(new TimeOnly(0, 30), DateTimeKind.Utc).AddDays(1),
+                Season = date.Month >= 10 ? date.Year : date.Year - 1,
+                Status = "Scheduled",
+                HomeTeam = new BalldontlieTeamDto
+                {
+                    Id = 2,
+                    FullName = "Boston Celtics",
+                    Name = "Celtics",
+                    Abbreviation = "BOS",
+                    City = "Boston",
+                    Conference = "East",
+                    Division = "Atlantic"
+                },
+                VisitorTeam = new BalldontlieTeamDto
+                {
+                    Id = 21,
+                    FullName = "New York Knicks",
+                    Name = "Knicks",
+                    Abbreviation = "NYK",
+                    City = "New York",
+                    Conference = "East",
+                    Division = "Atlantic"
+                }
+            }
+        };
     }
 }

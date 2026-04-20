@@ -6,16 +6,16 @@ namespace Sports.Api.Background;
 
 public class IngestionBackgroundService : BackgroundService
 {
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<IngestionBackgroundService> _logger;
     private readonly IngestionOptions _options;
-    private readonly SyncOrchestrator _syncOrchestrator;
 
     public IngestionBackgroundService(
-        SyncOrchestrator syncOrchestrator,
+        IServiceProvider serviceProvider,
         IOptions<IngestionOptions> options,
         ILogger<IngestionBackgroundService> logger)
     {
-        _syncOrchestrator = syncOrchestrator;
+        _serviceProvider = serviceProvider;
         _logger = logger;
         _options = options.Value;
     }
@@ -44,11 +44,44 @@ public class IngestionBackgroundService : BackgroundService
     {
         try
         {
-            await _syncOrchestrator.RunCycleAsync(cancellationToken);
+            using var scope = _serviceProvider.CreateScope();
+
+            var seedService = scope.ServiceProvider.GetRequiredService<SeedService>();
+            var predictionService = scope.ServiceProvider.GetRequiredService<PredictionService>();
+
+            var sportsDate = GetMadridSportsDate();
+            var dates = new[]
+            {
+                sportsDate.AddDays(-1),
+                sportsDate,
+                sportsDate.AddDays(1)
+            };
+
+            await seedService.SeedTeamsAsync(cancellationToken);
+
+            foreach (var targetDate in dates)
+            {
+                await seedService.SeedGamesByDateAsync(targetDate, cancellationToken);
+                await predictionService.CalculatePredictionsForDateAsync(targetDate, cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Ciclo de ingesta completado para ventana {FromDate} -> {ToDate}",
+                dates.First(),
+                dates.Last());
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Fallo en ciclo de ingesta.");
         }
+    }
+
+    private static DateOnly GetMadridSportsDate()
+    {
+        var madridTz = TimeZoneInfo.FindSystemTimeZoneById(
+            OperatingSystem.IsWindows() ? "Romance Standard Time" : "Europe/Madrid");
+
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, madridTz);
+        return DateOnly.FromDateTime(localNow);
     }
 }
